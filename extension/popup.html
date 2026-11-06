@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>影音接播</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <header>
+    <svg aria-hidden="true" width="34" height="34" viewBox="0 0 34 34" fill="none">
+      <rect width="34" height="34" rx="10" fill="#146458"/>
+      <path d="M10 10.5L19 17L10 23.5V10.5Z" fill="white" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M23 12V22M27 12V22" stroke="#a9ead7" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <div>
+      <h1>影音接播</h1>
+      <p>影片停下，音樂接著播</p>
+    </div>
+  </header>
+
+  <p id="status" class="status" role="status">正在讀取播放狀態…</p>
+
+  <label class="option">
+    <span><strong>自動暫停與接播</strong></span>
+    <input id="enabled" type="checkbox" role="switch" disabled>
+  </label>
+  <label class="option">
+    <span>
+      <strong>將此分頁當作音樂</strong>
+      <small id="musicHint">YouTube 歌單可在這裡指定。</small>
+    </span>
+    <input id="music" type="checkbox" role="switch" aria-describedby="musicHint" disabled>
+  </label>
+</body>
+</html>

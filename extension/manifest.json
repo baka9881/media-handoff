@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "影音接播",
+  "description": "播放網頁影片時暫停音樂，影片暫停或播完時從原處接播。",
+  "version": "1.0.0",
+  "minimum_chrome_version": "119",
+  "permissions": ["storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "icons": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "影音接播",
+    "default_icon": { "16": "icon-16.png", "32": "icon-32.png" }
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["media.js"],
+      "all_frames": true,
+      "match_origin_as_fallback": true,
+      "run_at": "document_start"
+    }
+  ]
+}
