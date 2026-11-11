@@ -1,8 +1,9 @@
 const RESUME_DELAY = 550;
+const PAUSE_CHECK_DELAY = 180;
 const initialState = Promise.all([
   chrome.storage.local.get({ enabled: true }),
   chrome.storage.session.get({ frames: {}, musicTabs: {} })
-]).then(([preferences, session]) => ({ ...preferences, ...session, lastBlocked: 0 }));
+]).then(([preferences, session]) => ({ ...preferences, ...session, lastBlocked: 0, failedPauses: new Set() }));
 
 let queue = Promise.resolve();
 let resumeTimer;
@@ -32,14 +33,33 @@ function isMusicTab(state, tabId, origin) {
 }
 
 async function ask(frame, message) {
+  const target = frame.documentId ? { documentId: frame.documentId } : { frameId: 0 };
   try {
-    return await chrome.tabs.sendMessage(frame.tabId, message, { documentId: frame.documentId });
+    return await chrome.tabs.sendMessage(frame.tabId, message, target);
   } catch {
     return null;
   }
 }
 
-async function reconcile(state) {
+async function checkConnections(live, currentTab) {
+  const connected = new Set(live.filter(frame => frame.media).map(frame => frame.tabId));
+  const audible = await chrome.tabs.query({ audible: true, status: 'complete' });
+  const playingTabs = audible.filter(tab => !tab.frozen && !tab.mutedInfo?.muted);
+  const targets = new Set(playingTabs.map(tab => tab.id));
+  if (currentTab?.status === 'complete' && originOf(currentTab.url)) targets.add(currentTab.id);
+
+  const missing = new Set();
+  await Promise.all([...targets].map(async tabId => {
+    if (connected.has(tabId)) return;
+    if (!await ask({ tabId }, { type: 'readMedia' })) missing.add(tabId);
+  }));
+  return {
+    disconnected: playingTabs.filter(tab => missing.has(tab.id)).length,
+    currentDisconnected: missing.has(currentTab?.id)
+  };
+}
+
+async function reconcile(state, currentTab) {
   const live = await Promise.all(Object.values(state.frames).map(async frame => ({
     ...frame,
     musicTab: isMusicTab(state, frame.tabId, frame.origin),
@@ -49,13 +69,21 @@ async function reconcile(state) {
   const videoTabs = new Set(live.filter(frame => frame.media?.video && !frame.musicTab)
     .map(frame => frame.tabId));
   const shouldPause = frame => state.enabled && videoTabs.size > Number(videoTabs.has(frame.tabId));
+  const needsPause = frame => shouldPause(frame) &&
+    (frame.media?.audio || (frame.media?.video && frame.musicTab));
 
-  await Promise.all(live.map(async frame => {
-    const { media, musicTab } = frame;
-    if (shouldPause(frame) && (media?.audio || (media?.video && musicTab))) {
-      frame.media = await ask(frame, { type: 'pauseMusic', musicTab });
-    }
-  }));
+  const toPause = live.filter(frame => needsPause(frame) && !state.failedPauses.has(frame.documentId));
+  if (toPause.length) {
+    await Promise.all(toPause.map(frame => ask(frame, { type: 'pauseMusic', musicTab: frame.musicTab })));
+    // Let the site's pause handler run before checking whether playback stayed paused.
+    await new Promise(resolve => setTimeout(resolve, PAUSE_CHECK_DELAY));
+    await Promise.all(toPause.map(async frame => {
+      frame.media = await ask(frame, { type: 'readMedia' });
+    }));
+  }
+  const stillPlaying = live.filter(needsPause);
+  state.failedPauses = new Set(stillPlaying.map(frame => frame.documentId));
+  const pauseFailed = new Set(stillPlaying.map(frame => frame.tabId)).size;
 
   const ready = live.filter(frame => frame.media?.held && !shouldPause(frame));
   clearTimeout(resumeTimer);
@@ -81,10 +109,13 @@ async function reconcile(state) {
   }
 
   await chrome.storage.session.set({ frames: state.frames });
-  const badge = !state.enabled ? 'OFF' : heldTabs.size ? String(heldTabs.size) : '';
-  await chrome.action.setBadgeBackgroundColor({ color: state.enabled ? '#18746d' : '#5b6272' });
+  const health = state.enabled ? await checkConnections(live, currentTab) : {};
+  const warning = pauseFailed || health.disconnected;
+  const badge = !state.enabled ? 'OFF' : warning ? '!' : heldTabs.size ? String(heldTabs.size) : '';
+  const color = !state.enabled ? '#5b6272' : warning ? '#ab421e' : '#18746d';
+  await chrome.action.setBadgeBackgroundColor({ color });
   await chrome.action.setBadgeText({ text: badge });
-  return { videos: videoTabs.size, held: heldTabs.size };
+  return { videos: videoTabs.size, held: heldTabs.size, pauseFailed, ...health };
 }
 
 async function popupState(state, message) {
@@ -94,6 +125,8 @@ async function popupState(state, message) {
   if (message.type === 'setEnabled') {
     state.enabled = message.enabled === true;
     await chrome.storage.local.set({ enabled: state.enabled });
+  } else if (message.type === 'checkHealth') {
+    state.failedPauses.clear();
   } else if (message.type === 'setMusicTab' && origin) {
     if (message.music === true) state.musicTabs[tab.id] = origin;
     else delete state.musicTabs[tab.id];
@@ -101,7 +134,7 @@ async function popupState(state, message) {
   }
 
   return {
-    ...await reconcile(state),
+    ...await reconcile(state, tab),
     enabled: state.enabled,
     canMark: Boolean(origin),
     autoMusic: isMusicSite(origin),
@@ -122,7 +155,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   } else if (message.type === 'resumeBlocked' && sender.tab && sender.documentId) {
     enqueue(state => { state.lastBlocked = Date.now(); });
   } else if (sender.url === chrome.runtime.getURL('popup.html') &&
-      ['getPopup', 'setEnabled', 'setMusicTab'].includes(message.type)) {
+      ['getPopup', 'checkHealth', 'setEnabled', 'setMusicTab'].includes(message.type)) {
     enqueue(state => popupState(state, message)).then(reply, () => reply(null));
     return true;
   }
@@ -135,16 +168,21 @@ chrome.tabs.onRemoved.addListener(tabId => enqueue(async state => {
     delete state.musicTabs[tabId];
     await chrome.storage.session.set({ musicTabs: state.musicTabs });
   }
-  if (removed.length) await reconcile(state);
+  await reconcile(state);
 }));
 
-chrome.tabs.onUpdated.addListener((tabId, change) => {
-  if (!change.url && !change.discarded && change.status !== 'complete') return;
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+  const audioChanged = change.audible !== undefined;
+  if (!audioChanged && !change.url && !change.discarded && change.status !== 'complete') return;
   enqueue(async state => {
     if (change.url && state.musicTabs[tabId] && state.musicTabs[tabId] !== originOf(change.url)) {
       delete state.musicTabs[tabId];
       await chrome.storage.session.set({ musicTabs: state.musicTabs });
     }
-    if (Object.values(state.frames).some(frame => frame.tabId === tabId)) await reconcile(state);
+    if (audioChanged || (change.status === 'complete' && tab.audible) ||
+        Object.values(state.frames).some(frame => frame.tabId === tabId)) await reconcile(state);
   });
 });
+
+chrome.runtime.onInstalled.addListener(() => enqueue(reconcile));
+chrome.runtime.onStartup.addListener(() => enqueue(reconcile));

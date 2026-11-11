@@ -7,6 +7,8 @@
   --line: #d6e5de;
   --accent: #146458;
   --tint: #e2f3eb;
+  --warning: #873a20;
+  --warning-tint: #ffeadd;
   --switch-off: #72827c;
   font: 14px/1.5 system-ui, "Microsoft JhengHei", sans-serif;
 }
@@ -20,6 +22,8 @@
     --line: #34514a;
     --accent: #74dec3;
     --tint: #1c3931;
+    --warning: #ffc2a7;
+    --warning-tint: #422a22;
     --switch-off: #637770;
   }
 }
@@ -46,6 +50,8 @@ header p { margin: 1px 0 0; color: var(--muted); font-size: 12px; }
   font-size: 13px;
   font-weight: 600;
 }
+
+.status.warning { background: var(--warning-tint); color: var(--warning); }
 
 .option {
   display: flex;
@@ -89,3 +95,19 @@ input[role="switch"]:checked { background: #187669; }
 input[role="switch"]:checked::after { transform: translateX(15px); }
 input[role="switch"]:disabled { opacity: 0.58; }
 input[role="switch"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.check-button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.check-button:disabled { opacity: 0.58; cursor: default; }
+.check-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
